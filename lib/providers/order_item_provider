@@ -1,0 +1,173 @@
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import '../models/order.dart';
+import '../models/order_item.dart';
+import '../models/menu_item.dart';
+
+class OrderProvider extends ChangeNotifier {
+  List<Order> _orders = [];
+  List<OrderItem> _cartItems = [];
+  bool _isLoading = false;
+
+  List<Order> get orders => _orders;
+  List<OrderItem> get cartItems => _cartItems;
+  bool get isLoading => _isLoading;
+
+  double get cartTotal {
+    return _cartItems.fold(0, (sum, item) => sum + item.totalPrice);
+  }
+
+  int get cartItemCount {
+    return _cartItems.fold(0, (sum, item) => sum + item.quantity);
+  }
+
+  OrderProvider() {
+    _loadOrders();
+    _loadCartItems();
+  }
+
+  Future<void> _loadOrders() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ordersJson = prefs.getString('orders');
+      if (ordersJson != null) {
+        final List<dynamic> ordersList = json.decode(ordersJson);
+        _orders = ordersList.map((order) => Order.fromJson(order)).toList();
+        notifyListeners();
+      }
+    } catch (e) {
+      print('Error loading orders: $e');
+    }
+  }
+
+  Future<void> _loadCartItems() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cartJson = prefs.getString('cart_items');
+      if (cartJson != null) {
+        final List<dynamic> cartList = json.decode(cartJson);
+        _cartItems = cartList.map((item) => OrderItem.fromJson(item)).toList();
+        notifyListeners();
+      }
+    } catch (e) {
+      print('Error loading cart items: $e');
+    }
+  }
+
+  Future<void> _saveOrders() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ordersJson = json.encode(_orders.map((order) => order.toJson()).toList());
+      await prefs.setString('orders', ordersJson);
+    } catch (e) {
+      print('Error saving orders: $e');
+    }
+  }
+
+  Future<void> _saveCartItems() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cartJson = json.encode(_cartItems.map((item) => item.toJson()).toList());
+      await prefs.setString('cart_items', cartJson);
+    } catch (e) {
+      print('Error saving cart items: $e');
+    }
+  }
+
+  void addToCart(MenuItem menuItem) {
+    final existingIndex = _cartItems.indexWhere(
+      (item) => item.menuItem.id == menuItem.id,
+    );
+
+    if (existingIndex >= 0) {
+      _cartItems[existingIndex].quantity++;
+    } else {
+      _cartItems.add(OrderItem(menuItem: menuItem));
+    }
+
+    _saveCartItems();
+    notifyListeners();
+  }
+
+  void removeFromCart(String menuItemId) {
+    _cartItems.removeWhere((item) => item.menuItem.id == menuItemId);
+    _saveCartItems();
+    notifyListeners();
+  }
+
+  void updateCartItemQuantity(String menuItemId, int quantity) {
+    final itemIndex = _cartItems.indexWhere(
+      (item) => item.menuItem.id == menuItemId,
+    );
+
+    if (itemIndex >= 0) {
+      if (quantity <= 0) {
+        _cartItems.removeAt(itemIndex);
+      } else {
+        _cartItems[itemIndex].quantity = quantity;
+      }
+      _saveCartItems();
+      notifyListeners();
+    }
+  }
+
+  void clearCart() {
+    _cartItems.clear();
+    _saveCartItems();
+    notifyListeners();
+  }
+
+  Future<bool> placeOrder(String customerName, String customerPhone, {String? notes}) async {
+    if (_cartItems.isEmpty) return false;
+
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      // Simulate API call delay
+      await Future.delayed(const Duration(seconds: 1));
+
+      final order = Order(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        items: List.from(_cartItems), // Create a copy of cart items
+        orderTime: DateTime.now(),
+        customerName: customerName,
+        customerPhone: customerPhone,
+        notes: notes,
+      );
+
+      _orders.insert(0, order); // Add to beginning of list (most recent first)
+      _cartItems.clear(); // Clear cart after placing order
+
+      await _saveOrders();
+      await _saveCartItems();
+
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      print('Error placing order: $e');
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  void updateOrderStatus(String orderId, OrderStatus newStatus) {
+    final orderIndex = _orders.indexWhere((order) => order.id == orderId);
+    if (orderIndex >= 0) {
+      _orders[orderIndex].status = newStatus;
+      _saveOrders();
+      notifyListeners();
+    }
+  }
+
+  Order? getOrderById(String orderId) {
+    try {
+      return _orders.firstWhere((order) => order.id == orderId);
+    } catch (e) {
+      return null;
+    }
+  }
+}
